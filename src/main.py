@@ -24,7 +24,6 @@ class Train_Test(object):
             
             sep_flags = []
             BATCH_SIZE, EPOCH, LR, K_FOLDS = get_hyperparams(os.path.join('utils','hyperparams.yaml'), dataset_name)
-            EPOCH           = 1
             
             for (classifer_id, classifier_name) in enumerate(args.CLASSIFIERS):
                 
