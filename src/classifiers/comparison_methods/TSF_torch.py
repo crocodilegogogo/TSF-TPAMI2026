@@ -382,7 +382,7 @@ class FALayer(nn.Module):
         self.in_dim = in_dim
         self.dropout = nn.Dropout(dropout)
         self.gate = nn.Sequential(nn.Linear(3*in_dim//2, 3*in_dim//2),
-                                  nn.PReLU(),
+                                  nn.ReLU(),
                                   nn.Linear(3*in_dim//2, 1),
                                   nn.Tanh()
                                  )
@@ -415,15 +415,19 @@ class HeteGNN(nn.Module):
 
         self.BN_norms       = nn.ModuleList()
         self.LN_norms       = nn.ModuleList()
-        self.activations    = nn.ModuleList()
+        # self.activations    = nn.ModuleList()
         
-        self.layers = nn.ModuleList()
+        self.layers   = nn.ModuleList()
         self.gate_res = nn.ModuleList()
+        
+        self.activation = nn.PReLU()
+        self.BN_norm    = nn.BatchNorm1d(out_dim)
+        self.LN_norm    = nn.LayerNorm(out_dim)
         
         for i in range(self.layer_num):
             self.BN_norms.append(nn.BatchNorm1d(3*hidden_dim//2))
             self.LN_norms.append(nn.LayerNorm(3*hidden_dim//2))
-            self.activations.append(nn.PReLU())
+            # self.activations.append(nn.PReLU())
             self.layers.append(FALayer(hidden_dim, dropout))
 
         self.t1_posture = nn.Sequential(
@@ -464,7 +468,11 @@ class HeteGNN(nn.Module):
         raw = h
         for i in range(self.layer_num):
             
-            h = self.activations[i](self.BN_norms[i](self.LN_norms[i](self.layers[i](g, h)[0] + h)))
+            # h = self.BN_norms[i](self.LN_norms[i](self.layers[i](g, h)[0] + h))
+            h = self.layers[i](g, h)[0] + h
+            # h = self.activations[i](self.BN_norms[i](self.LN_norms[i](self.layers[i](g, h)[0] + h)))
+            # h = self.activations[i](self.LN_norms[i](self.layers[i](g, h)[0] + h))
+            # h = self.LN_norms[i](self.layers[i](g, h)[0] + h)
 
             if i == 0:
                 hh = h
@@ -475,7 +483,9 @@ class HeteGNN(nn.Module):
         
         h = torch.cat((raw, hh), 1)
         
-        h = self.t2(h)
+        # h = self.activation(self.t2(h))
+        h = self.activation(self.BN_norm(self.LN_norm(self.t2(h))))
+        # h = self.t2(h)
         h = self.dropout2(h)
         
         return h, ee
@@ -539,75 +549,21 @@ class SelfAttention(nn.Module):
         
         return self.unifyheads(out) # (b, t, k)
 
-class TransformerBlock(nn.Module):
-    def __init__(self, k, heads, drop_rate, data_length, INFERENCE_DEVICE):
-        super(TransformerBlock, self).__init__()
-
-        self.gamma1 = nn.Parameter(torch.tensor([1.]))
-        self.attention = SelfAttention(k, heads = heads, drop_rate = drop_rate)
-        self.norm1   = nn.BatchNorm1d(k)
-
-        self.DWT_1D  = DWT_1D(in_channels = k, INFERENCE_DEVICE=INFERENCE_DEVICE)
-
-        self.conv_trans = nn.Sequential(
-            nn.Conv2d(k, k, (1,3), 1, (0,3//2)),
-            nn.BatchNorm2d(k),
-            nn.PReLU(),
-            )
-
-        self.mlp = nn.Sequential(
-            nn.Conv1d(k, 4*k, 1, 1),
-            nn.ReLU(),
-            nn.Conv1d(4*k, k, 1, 1)
-        )
-        
-        self.gumbel_block2 = gumble_block_1D(k*2, 2, data_length)
-        
-        self.norm2 = nn.BatchNorm1d(k)
-        self.dropout_forward = nn.Dropout(drop_rate)
-
-    def forward(self, x, x_high, test_flag=False):
-        
-        attended = self.attention(x)
-        attended = attended + x + x_high # self.gamma1*x_high
-        attended = attended.permute(0,2,1)
-        
-        x        = self.norm1(attended)
-        
-        x_low2, x_high2 = self.DWT_1D(x)
-        x           = torch.cat([x_low2.unsqueeze(2), x_high2.unsqueeze(2)], dim=2)
-        x           = self.conv_trans(x)
-
-        x_low2      = x[:,:,0,:]
-        x_high2     = x[:,:,1,:]
-        x_low2, x_high2, ch_mask_2 = self.gumbel_block2(x_low2, x_high2, test_flag)
-        x           = torch.cat([x_low2, x_high2], dim=0)
-
-        x           = self.mlp(x)
-        x_low_IDWT  = x[0:x_low2.shape[0],:,:]
-        x_high_IDWT = x[x_low2.shape[0]:2*x_low2.shape[0],:,:]
-
-        feedforward = x_low_IDWT
-
-        feedforward = feedforward + x_low2
-
-        return self.dropout_forward(self.norm2(feedforward).permute(0,2,1)), self.dropout_forward(x_high_IDWT.permute(0,2,1)), ch_mask_2
-
-class EndTransformerBlock(nn.Module):
+class Transformer_1(nn.Module):
     def __init__(self, k, heads, drop_rate):
-        super(EndTransformerBlock, self).__init__()
+        super(Transformer_1, self).__init__()
 
-        # self.gamma2    = nn.Parameter(torch.tensor([1.]))
         self.attention = SelfAttention(k, heads = heads, drop_rate = drop_rate)
         self.norm1     = nn.BatchNorm1d(k)
 
         self.mlp = nn.Sequential(
             nn.Conv1d(k, 4*k, 1, 1),
-            nn.ReLU(),
+            nn.PReLU(),
             nn.Conv1d(4*k, k, 1, 1)
         )
-        self.norm2 = nn.BatchNorm1d(k)
-        self.dropout_forward = nn.Dropout(drop_rate)
+        self.norm2              = nn.BatchNorm1d(k)
+        # self.activation_forward = nn.PReLU()
+        self.dropout_forward    = nn.Dropout(drop_rate)
 
     def forward(self, x, x_high):
         
@@ -615,11 +571,47 @@ class EndTransformerBlock(nn.Module):
         attended = attended + x + x_high # self.gamma2*x_high
         attended = attended.permute(0,2,1)
         
-        x = self.norm1(attended)
+        # x      = self.activation_forward(self.norm1(attended))
+        x        = self.norm1(attended)
+        # return x
+        
         feedforward = self.mlp(x)
         feedforward = feedforward + x
         
-        return self.dropout_forward(self.norm2(feedforward).permute(0,2,1))
+        return self.dropout_forward(self.norm2(feedforward))
+        # return self.dropout_forward(self.activation_forward(self.norm2(feedforward)))
+
+
+class Transformer_2(nn.Module):
+    def __init__(self, k, heads, drop_rate):
+        super(Transformer_2, self).__init__()
+
+        # self.gamma2    = nn.Parameter(torch.tensor([1.]))
+        self.attention = SelfAttention(k, heads = heads, drop_rate = drop_rate)
+        self.norm1     = nn.BatchNorm1d(k)
+
+        self.mlp = nn.Sequential(
+            nn.Conv1d(k, 4*k, 1, 1),
+            nn.PReLU(),
+            nn.Conv1d(4*k, k, 1, 1)
+        )
+        self.norm2                = nn.BatchNorm1d(k)
+        # self.activation_forward   = nn.PReLU()
+        self.dropout_forward      = nn.Dropout(drop_rate)
+
+    def forward(self, x, x_high):
+        
+        attended = self.attention(x)
+        attended = attended + x + x_high # self.gamma2*x_high
+        attended = attended.permute(0,2,1)
+        
+        # x           = self.activation_forward(self.norm1(attended))
+        x           = self.norm1(attended)
+        feedforward = self.mlp(x)
+        feedforward = feedforward + x
+        
+        return self.dropout_forward(self.norm2(feedforward))
+        # return self.dropout_forward(self.activation_forward(self.norm2(feedforward)))
 
 class TSF(nn.Module):
     def __init__(self, input_2Dfeature_channel, input_channel, feature_channel,
@@ -642,30 +634,51 @@ class TSF(nn.Module):
             setattr(self, 'IMU_fusion_blocks%i' % i, IMU_fusion_block)
             self.IMU_fusion_blocks.append(IMU_fusion_block)
         
-        self.conv1 = nn.Sequential(
+        self.perform_local_temporal_fusion = nn.Sequential(
             nn.Conv2d(feature_channel, feature_channel, (1,kernel_size), 1, (0,kernel_size//2)),
             nn.BatchNorm2d(feature_channel),
             nn.PReLU(),
             )
         
-        self.conv3 = nn.Sequential(
+        self.brush_conv_0 = nn.Sequential(
             nn.Conv2d(feature_channel, feature_channel, (1,kernel_size), 1, (0,kernel_size//2)),
             nn.BatchNorm2d(feature_channel),
             nn.PReLU(),
+            # nn.Conv2d(feature_channel, feature_channel, (1,1), 1, (0,0)),
+            # nn.BatchNorm2d(feature_channel),
+            # nn.PReLU(),
             )
         
-        self.conv5 = nn.Sequential(
+        self.brush_conv_1 = nn.Sequential(
             nn.Conv2d(feature_channel, feature_channel, (1,kernel_size), 1, (0,kernel_size//2)),
             nn.BatchNorm2d(feature_channel),
             nn.ReLU(),
             )
         
-        self.DWT_2D  = DWT_2D(in_channels = feature_channel, INFERENCE_DEVICE=INFERENCE_DEVICE)
+        self.brush_conv_2 = nn.Sequential(
+            nn.Conv2d(feature_channel_out, feature_channel_out, (1,3), 1, (0,3//2)),
+            nn.BatchNorm2d(feature_channel_out),
+            nn.PReLU(),
+            # nn.Conv2d(feature_channel_out, feature_channel_out, (1,1), 1, (0,0)),
+            # nn.BatchNorm2d(feature_channel_out),
+            # nn.PReLU(),
+            )
+        
+        self.linear_high1 = nn.Linear(3*feature_channel, self.feature_channel_out)
+        
+        self.DWT_2D       = DWT_2D(in_channels = feature_channel, INFERENCE_DEVICE=INFERENCE_DEVICE)
+        self.DWT_1D       = DWT_1D(in_channels = feature_channel_out, INFERENCE_DEVICE=INFERENCE_DEVICE)
         
         if input_channel//POS_NUM  == 12:
             reduced_channel = 6
         else:
             reduced_channel = 3
+        
+        gragh                   = self.create_perstamp_gragh((9-reduced_channel)//3*POS_NUM, INFERENCE_DEVICE)
+        
+        self.create_large_gragh(gragh, train_size, val_size, test_size, data_length, BATCH_SIZE, test_split)
+        
+        self.HeteGNNsubnet      = HeteGNN(feature_channel, feature_channel, feature_channel_out, 0.2, POS_NUM)
         
         self.graph_ave_pooling = nn.AdaptiveAvgPool1d(1)
         
@@ -675,23 +688,18 @@ class TSF(nn.Module):
         
         self.gumbel_block1 = gumble_block_2D(feature_channel*2, 2, (input_channel//POS_NUM-reduced_channel)*scale_num, data_length//4)
         
+        self.gumbel_block2 = gumble_block_1D(feature_channel_out*2, 2, data_length)
+        
         self.position_encode = PositionalEncoding(feature_channel_out, drop_rate, data_length//4)
         
-        self.transformer_block1 = TransformerBlock(feature_channel_out, multiheads, drop_rate, data_length//8, INFERENCE_DEVICE)
+        # self.perform_global_temporal_fusion_1 = TransformerBlock(feature_channel_out, multiheads, drop_rate, data_length//8, INFERENCE_DEVICE)
+        self.perform_global_temporal_fusion_1 = Transformer_1(feature_channel_out, multiheads, drop_rate)
         
-        self.transformer_block2 = EndTransformerBlock(feature_channel_out, multiheads, drop_rate)
+        self.perform_global_temporal_fusion_2 = Transformer_2(feature_channel_out, multiheads, drop_rate)
         
         self.global_ave_pooling = nn.AdaptiveAvgPool1d(1)
         
         self.linear             = nn.Linear(feature_channel_out, num_class)
-        
-        gragh                   = self.create_perstamp_gragh((9-reduced_channel)//3*POS_NUM, INFERENCE_DEVICE)
-        
-        self.linear_high1       = nn.Linear(3*feature_channel, self.feature_channel_out)
-        
-        self.create_large_gragh(gragh, train_size, val_size, test_size, data_length, BATCH_SIZE, test_split)
-        
-        self.HeteGNNsubnet      = HeteGNN(feature_channel, feature_channel, feature_channel_out, 0.2, POS_NUM)
         
     def create_perstamp_gragh(self, node_num, INFERENCE_DEVICE):
         node_set         = np.arange(node_num).tolist()
@@ -761,7 +769,93 @@ class TSF(nn.Module):
             batch_gragh = self.flops_g
         # print(batch_size)
         return batch_gragh
+    
+    def perform_IMU_fusion(self, x_input, IMU_num):
+        
+        for i in range(IMU_num):
+            x_cur_IMU, cur_sensor_attn   = self.IMU_fusion_blocks[i](x_input[:,:,i*9:(i+1)*9,:])
+            if i == 0:
+                x         = x_cur_IMU
+                IMU_attns = cur_sensor_attn
+            else:
+                x         = torch.cat((x, x_cur_IMU), 2)
+                IMU_attns = torch.cat((IMU_attns, cur_sensor_attn), 2)
+        return x, IMU_attns
+    
+    def perform_modality_node_fusion(self, x_low1, x_high1, batch_size, data_length, IMU_num):
+        
+        # Convert data size to meet HeteGNN's input requrements.
+        x_low1  = x_low1.permute(0,3,2,1)
+        x_low1  = x_low1.reshape(batch_size, data_length//4, IMU_num, -1, 3 * self.feature_channel)
+        x_high1 = x_high1.permute(0,3,2,1)
+        x_high1 = x_high1.reshape(batch_size, data_length//4, IMU_num, -1, 3 * self.feature_channel)
+        
+        # Transform x_high1 to be a residual term.
+        x_high1 = self.linear_high1(x_high1).reshape(batch_size*(data_length//4), -1, self.feature_channel_out)
+        
+        # Generate heterogeneous graph.
+        batch_gragh = self.generate_batch_gragh(batch_size, self.BATCH_SIZE, self.test_split)
+        # Adaptive filtering in graph Fourier domain.
+        x_low1, Graph_attns = self.HeteGNNsubnet(batch_gragh, x_low1)
+        
+        x_low1 = x_low1.reshape(batch_size*(data_length//4), -1, self.feature_channel_out)
+        
+        # Perform graph pooling.
+        x = torch.cat([x_low1, x_high1], dim=0)
+        x = x.reshape(2*batch_size*(data_length//4), -1, self.feature_channel_out)
+        x = x.permute(0,2,1)
+        x = self.graph_ave_pooling(x).squeeze(-1)
+        x = x.reshape(2*batch_size, data_length//4, -1)
+        
+        return x, Graph_attns
+    
+    def perform_frequency_selection_0(self, x, test_flag):
+        
+        x_low0, x_high0 = self.DWT_2D(x)
+        x               = torch.cat([x_low0, x_high0], dim=2)
+        
+        x               = self.brush_conv_0(x) #+ x
+        
+        x_low0          = x[:,:,0:x.shape[2]//2,:]
+        x_high0         = x[:,:,x.shape[2]//2:x.shape[2],:]
+        x_low0, x_high0, ch_mask_0 = self.gumbel_block0(x_low0, x_high0, test_flag)
+        
+        return x_low0, x_high0, ch_mask_0
+    
+    def perform_frequency_selection_1(self, x, test_flag):
+        
+        x_low1, x_high1 = self.DWT_2D(x)
+        x               = torch.cat([x_low1, x_high1], dim=2)
+        
+        x               = self.brush_conv_1(x) #+ x
+        
+        x_low1          = x[:,:,0:x.shape[2]//2,:]
+        x_high1         = x[:,:,x.shape[2]//2:x.shape[2],:]
+        x_low1, x_high1, ch_mask_1 = self.gumbel_block1(x_low1, x_high1, test_flag)
+        
+        return x_low1, x_high1, ch_mask_1
+    
+    def perform_frequency_selection_2(self, x, test_flag):
+        
+        x_low2, x_high2 = self.DWT_1D(x)
+        x               = torch.cat([x_low2.unsqueeze(2), x_high2.unsqueeze(2)], dim=2)
+        
+        x               = self.brush_conv_2(x) #+ x
 
+        x_low2          = x[:,:,0,:]
+        x_high2         = x[:,:,1,:]
+        x_low2, x_high2, ch_mask_2 = self.gumbel_block2(x_low2, x_high2, test_flag)
+        
+        # x               = torch.cat([x_low2, x_high2], dim=0)
+        # feedforward     = self.perform_global_temporal_fusion_1.mlp(x) + x
+        # feedforward     = self.perform_global_temporal_fusion_1.norm2(feedforward)
+        # feedforward     = self.perform_global_temporal_fusion_1.dropout_forward(feedforward)
+        
+        # x_low2          = feedforward[0:x_low2.shape[0],:,:]
+        # x_high2         = feedforward[x_low2.shape[0]:2*x_low2.shape[0],:,:]
+        
+        return x_low2.permute(0,2,1), x_high2.permute(0,2,1), ch_mask_2
+    
     def forward(self, x, test_flag=False):
         
         # flops
@@ -776,64 +870,29 @@ class TSF(nn.Module):
         IMU_num         = self.POS_NUM
         x_input         = x
         
-        for i in range(IMU_num):
-            x_cur_IMU, cur_sensor_attn   = self.IMU_fusion_blocks[i](x_input[:,:,i*9:(i+1)*9,:])
-            if i == 0:
-                x         = x_cur_IMU
-                IMU_attns = cur_sensor_attn
-            else:
-                x         = torch.cat((x, x_cur_IMU), 2)
-                IMU_attns = torch.cat((IMU_attns, cur_sensor_attn), 2)
+        ### IMU fusion block
+        x, IMU_attns               = self.perform_IMU_fusion(x_input, IMU_num)
         
-        x_low0, x_high0 = self.DWT_2D(x)
-        x               = torch.cat([x_low0, x_high0], dim=2)
-        x               = self.conv1(x)
-        x_low0          = x[:,:,0:x.shape[2]//2,:]
-        x_high0         = x[:,:,x.shape[2]//2:x.shape[2],:]
-        x_low0, x_high0, ch_mask_0 = self.gumbel_block0(x_low0, x_high0, test_flag)
+        ### Local temporal fusion block ###
+        x_low0, x_high0, ch_mask_0 = self.perform_frequency_selection_0(x, test_flag)
+        x                          = self.perform_local_temporal_fusion(x_low0) + x_high0
         
-        x = self.conv3(x_low0) + x_high0
+        ### Golabal temporal fusion block 1 ###
+        x_low1, x_high1, ch_mask_1 = self.perform_frequency_selection_1(x, test_flag)
+        ### Modality node fusion block ###
+        x, Graph_attns             = self.perform_modality_node_fusion(x_low1, x_high1, batch_size, data_length, IMU_num)
+        # perform global temporal fusion
+        x_high1                    = x[x.shape[0]//2:x.shape[0],:,:]
+        x_low1                     = self.position_encode(x[0:x.shape[0]//2,:,:].permute(0,2,1))
+        x                          = self.perform_global_temporal_fusion_1(x_low1.permute(0,2,1), x_high1)
         
-        x_low1, x_high1 = self.DWT_2D(x)
+        ### Golabal temporal fusion block 2 ###
+        x_low2, x_high2, ch_mask_2 = self.perform_frequency_selection_2(x, test_flag)
+        x                          = self.perform_global_temporal_fusion_2(x_low2, x_high2)
         
-        x = torch.cat([x_low1, x_high1], dim=2)
+        x                          = self.global_ave_pooling(x).squeeze(-1)
         
-        x = self.conv5(x)
-        
-        x_low1    = x[:,:,0:x.shape[2]//2,:]
-        x_high1   = x[:,:,x.shape[2]//2:x.shape[2],:]
-        x_low1, x_high1, ch_mask_1 = self.gumbel_block1(x_low1, x_high1, test_flag)
-        
-        x_low1 = x_low1.permute(0,3,2,1)
-        x_low1 = x_low1.reshape(batch_size, data_length//4, IMU_num, -1, 3 * self.feature_channel)
-        x_high1 = x_high1.permute(0,3,2,1)
-        x_high1 = x_high1.reshape(batch_size, data_length//4, IMU_num, -1, 3 * self.feature_channel)
-        
-        x_high1 = self.linear_high1(x_high1).reshape(batch_size*(data_length//4), -1, self.feature_channel_out)
-        
-        batch_gragh = self.generate_batch_gragh(batch_size, self.BATCH_SIZE, self.test_split)
-        
-        x_low1, Graph_attns = self.HeteGNNsubnet(batch_gragh, x_low1)
-        x_low1 = x_low1.reshape(batch_size*(data_length//4), -1, self.feature_channel_out)
-        
-        x = torch.cat([x_low1, x_high1], dim=0)
-        x = x.reshape(2*batch_size*(data_length//4), -1, self.feature_channel_out)
-        x = x.permute(0,2,1)
-        
-        x = self.graph_ave_pooling(x).squeeze(-1)
-        x = x.reshape(2*batch_size, data_length//4, -1)
-        x = x.permute(0,2,1)
-        
-        x_high1 = x[x.shape[0]//2:x.shape[0],:,:]
-        x_low1  = self.position_encode(x[0:x.shape[0]//2,:,:])
-        
-        x, x_high2, ch_mask_2 = self.transformer_block1(x_low1.permute(0,2,1), x_high1.permute(0,2,1), test_flag)
-        x                     = self.transformer_block2(x, x_high2)
-        x                     = x.permute(0,2,1)
-        
-        x = self.global_ave_pooling(x).squeeze(-1)
-        
-        output = self.linear(x)
+        output                     = self.linear(x)
         
         return output, [IMU_attns, Graph_attns, torch.cat((ch_mask_0,ch_mask_1,ch_mask_2),1)]
     

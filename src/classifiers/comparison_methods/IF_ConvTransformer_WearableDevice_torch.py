@@ -128,9 +128,9 @@ class TransformerBlock(nn.Module):
         attended = self.attention(x)
         attended = attended + x
         attended = attended.permute(0,2,1)
-        
+        # Norm
         x = self.norm1(attended).permute(0,2,1)
-        # feedforward and layer norm
+        # feedforward
         feedforward = self.mlp(x)
         
         feedforward = feedforward + x
