@@ -15,7 +15,6 @@ import time
 from utils.utils import *
 import os
 from torch.nn.utils import weight_norm
-# from contiguous_params import ContiguousParams
 import pywt
 from torch.autograd import Function
 from thop import profile
@@ -306,9 +305,8 @@ def gumbel_softmax(x, dim, tau):
 class gumble_block_2D(nn.Module):
     def __init__(self, inchannel, outchannel, data_channel, data_length):
         super(gumble_block_2D, self).__init__()
-        # self.Lnorm      = nn.LayerNorm([inchannel//2,data_channel,data_length], elementwise_affine=False)
+        
         self.ch_mask_1  = nn.Sequential(
-            # nn.BatchNorm2d(inchannel),
             nn.AdaptiveAvgPool2d(1),
             nn.Conv2d(inchannel, inchannel//2, kernel_size=1),
             nn.PReLU(),
@@ -351,7 +349,7 @@ class gumble_block_1D(nn.Module):
             nn.PReLU()
         )
 
-        self.tau        = 1 # nn.Parameter(torch.tensor([1.]))
+        self.tau        = 1
         self.outchannel = outchannel
 
     def _update_tau(self, tau):
@@ -364,7 +362,7 @@ class gumble_block_1D(nn.Module):
         out = torch.cat((x_low.unsqueeze(1), x_high.unsqueeze(1)), dim=1)
         ch_mask_1  = self.ch_mask_1(x)
 
-        ch_mask_1  = gumbel_softmax(ch_mask_1, dim=1, tau=self.tau).unsqueeze(-1) # [128, 2, 1, 1]
+        ch_mask_1  = gumbel_softmax(ch_mask_1, dim=1, tau=self.tau).unsqueeze(-1)
         
         if test_flag == True:
             ch_mask_1        = torch.argmax(ch_mask_1, 1)
@@ -391,7 +389,7 @@ class FALayer(nn.Module):
     def edge_applying(self, edges):
         
         h2 = edges.dst['h'] * edges.src['h']
-        g  = self.gate(h2) # .squeeze(-1) # * (-1)
+        g  = self.gate(h2)
         
         e  = g
         e  = self.dropout(e)
@@ -412,10 +410,6 @@ class HeteGNN(nn.Module):
         self.layer_num = layer_num
         self.dropout1  = nn.Dropout(dropout)
         self.dropout2  = nn.Dropout(dropout)
-
-        self.BN_norms       = nn.ModuleList()
-        self.LN_norms       = nn.ModuleList()
-        # self.activations    = nn.ModuleList()
         
         self.layers   = nn.ModuleList()
         self.gate_res = nn.ModuleList()
@@ -425,9 +419,6 @@ class HeteGNN(nn.Module):
         self.LN_norm    = nn.LayerNorm(out_dim)
         
         for i in range(self.layer_num):
-            self.BN_norms.append(nn.BatchNorm1d(3*hidden_dim//2))
-            self.LN_norms.append(nn.LayerNorm(3*hidden_dim//2))
-            # self.activations.append(nn.PReLU())
             self.layers.append(FALayer(hidden_dim, dropout))
 
         self.t1_posture = nn.Sequential(
@@ -468,11 +459,7 @@ class HeteGNN(nn.Module):
         raw = h
         for i in range(self.layer_num):
             
-            # h = self.BN_norms[i](self.LN_norms[i](self.layers[i](g, h)[0] + h))
             h = self.layers[i](g, h)[0] + h
-            # h = self.activations[i](self.BN_norms[i](self.LN_norms[i](self.layers[i](g, h)[0] + h)))
-            # h = self.activations[i](self.LN_norms[i](self.layers[i](g, h)[0] + h))
-            # h = self.LN_norms[i](self.layers[i](g, h)[0] + h)
 
             if i == 0:
                 hh = h
@@ -482,10 +469,7 @@ class HeteGNN(nn.Module):
                 ee = torch.cat((ee, self.layers[i](g, h)[1]), 0)
         
         h = torch.cat((raw, hh), 1)
-        
-        # h = self.activation(self.t2(h))
         h = self.activation(self.BN_norm(self.LN_norm(self.t2(h))))
-        # h = self.t2(h)
         h = self.dropout2(h)
         
         return h, ee
@@ -562,31 +546,26 @@ class Transformer_1(nn.Module):
             nn.Conv1d(4*k, k, 1, 1)
         )
         self.norm2              = nn.BatchNorm1d(k)
-        # self.activation_forward = nn.PReLU()
         self.dropout_forward    = nn.Dropout(drop_rate)
 
     def forward(self, x, x_high):
         
         attended = self.attention(x)
-        attended = attended + x + x_high # self.gamma2*x_high
+        attended = attended + x + x_high
         attended = attended.permute(0,2,1)
         
-        # x      = self.activation_forward(self.norm1(attended))
         x        = self.norm1(attended)
-        # return x
         
         feedforward = self.mlp(x)
         feedforward = feedforward + x
         
         return self.dropout_forward(self.norm2(feedforward))
-        # return self.dropout_forward(self.activation_forward(self.norm2(feedforward)))
 
 
 class Transformer_2(nn.Module):
     def __init__(self, k, heads, drop_rate):
         super(Transformer_2, self).__init__()
 
-        # self.gamma2    = nn.Parameter(torch.tensor([1.]))
         self.attention = SelfAttention(k, heads = heads, drop_rate = drop_rate)
         self.norm1     = nn.BatchNorm1d(k)
 
@@ -596,22 +575,19 @@ class Transformer_2(nn.Module):
             nn.Conv1d(4*k, k, 1, 1)
         )
         self.norm2                = nn.BatchNorm1d(k)
-        # self.activation_forward   = nn.PReLU()
         self.dropout_forward      = nn.Dropout(drop_rate)
 
     def forward(self, x, x_high):
         
         attended = self.attention(x)
-        attended = attended + x + x_high # self.gamma2*x_high
+        attended = attended + x + x_high
         attended = attended.permute(0,2,1)
         
-        # x           = self.activation_forward(self.norm1(attended))
         x           = self.norm1(attended)
         feedforward = self.mlp(x)
         feedforward = feedforward + x
         
         return self.dropout_forward(self.norm2(feedforward))
-        # return self.dropout_forward(self.activation_forward(self.norm2(feedforward)))
 
 class TSF(nn.Module):
     def __init__(self, input_2Dfeature_channel, input_channel, feature_channel,
@@ -644,9 +620,6 @@ class TSF(nn.Module):
             nn.Conv2d(feature_channel, feature_channel, (1,kernel_size), 1, (0,kernel_size//2)),
             nn.BatchNorm2d(feature_channel),
             nn.PReLU(),
-            # nn.Conv2d(feature_channel, feature_channel, (1,1), 1, (0,0)),
-            # nn.BatchNorm2d(feature_channel),
-            # nn.PReLU(),
             )
         
         self.brush_conv_1 = nn.Sequential(
@@ -659,9 +632,6 @@ class TSF(nn.Module):
             nn.Conv2d(feature_channel_out, feature_channel_out, (1,3), 1, (0,3//2)),
             nn.BatchNorm2d(feature_channel_out),
             nn.PReLU(),
-            # nn.Conv2d(feature_channel_out, feature_channel_out, (1,1), 1, (0,0)),
-            # nn.BatchNorm2d(feature_channel_out),
-            # nn.PReLU(),
             )
         
         self.linear_high1 = nn.Linear(3*feature_channel, self.feature_channel_out)
@@ -692,7 +662,6 @@ class TSF(nn.Module):
         
         self.position_encode = PositionalEncoding(feature_channel_out, drop_rate, data_length//4)
         
-        # self.perform_global_temporal_fusion_1 = TransformerBlock(feature_channel_out, multiheads, drop_rate, data_length//8, INFERENCE_DEVICE)
         self.perform_global_temporal_fusion_1 = Transformer_1(feature_channel_out, multiheads, drop_rate)
         
         self.perform_global_temporal_fusion_2 = Transformer_2(feature_channel_out, multiheads, drop_rate)
@@ -713,7 +682,7 @@ class TSF(nn.Module):
             g_nb         = g_nb      + nb_node_set
         # cal indegree
         gragh = dgl.graph((g_ego, g_nb))
-        deg   = gragh.in_degrees().float().clamp(min=1) # if degrees < 1, set them as 1
+        deg   = gragh.in_degrees().float().clamp(min=1)
         if INFERENCE_DEVICE == 'TEST_CUDA':
             gragh = gragh.to('cuda')
             deg   = deg.cuda()
@@ -846,14 +815,6 @@ class TSF(nn.Module):
         x_high2         = x[:,:,1,:]
         x_low2, x_high2, ch_mask_2 = self.gumbel_block2(x_low2, x_high2, test_flag)
         
-        # x               = torch.cat([x_low2, x_high2], dim=0)
-        # feedforward     = self.perform_global_temporal_fusion_1.mlp(x) + x
-        # feedforward     = self.perform_global_temporal_fusion_1.norm2(feedforward)
-        # feedforward     = self.perform_global_temporal_fusion_1.dropout_forward(feedforward)
-        
-        # x_low2          = feedforward[0:x_low2.shape[0],:,:]
-        # x_high2         = feedforward[x_low2.shape[0]:2*x_low2.shape[0],:,:]
-        
         return x_low2.permute(0,2,1), x_high2.permute(0,2,1), ch_mask_2
     
     def forward(self, x, test_flag=False):
@@ -977,9 +938,6 @@ def train_op(network, EPOCH, BATCH_SIZE, LR,
     accuracy_test_results = []
     macro_f1_test_results       = []
     
-    # prepare optimizer&scheduler&loss_function
-    # parameters = ContiguousParams(network.parameters())
-    # optimizer = torch.optim.Adam(parameters.contiguous(),lr = LR)
     parameters = network.parameters()
     optimizer  = torch.optim.Adam(parameters,lr = LR)
     scheduler  = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, 

@@ -303,6 +303,7 @@ def create_classifier(dataset_name, classifier_name, input_channel, POS_NUM,
     hyperparameters = yaml.load(hparam_file, Loader=yaml.FullLoader)
     conv_chnnl      = hyperparameters[classifier_name]['conv_chnnl'][dataset_name]
     context_chnnl   = hyperparameters[classifier_name]['context_chnnl'][dataset_name]
+    dropoutrate     = hyperparameters['Dropout_rate'][dataset_name]
     
 ############################## comparison methods #############################
     
@@ -401,5 +402,5 @@ def create_classifier(dataset_name, classifier_name, input_channel, POS_NUM,
         #      kernel_size, kernel_size_grav, scale_num, feature_channel_out,
         #      multiheads, drop_rate, dataset_name, POS_NUM, data_length, train_size,
         #      val_size, test_size, num_class)
-        return TSF_torch.TSF(1, input_channel, conv_chnnl, 11, 5, 1, context_chnnl, 1, 0.2, dataset_name, POS_NUM, data_length, 
+        return TSF_torch.TSF(1, input_channel, conv_chnnl, 11, 5, 1, context_chnnl, 1, dropoutrate, dataset_name, POS_NUM, data_length, 
                              train_size, val_size, test_size, nb_classes, BATCH_SIZE, INFERENCE_DEVICE, test_split), TSF_torch

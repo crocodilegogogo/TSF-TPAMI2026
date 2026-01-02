@@ -22,6 +22,18 @@ EPOCH:
   DSADS: 30
   SHO: 30
 
+Dropout_rate:
+  HAPT: 0.1
+  Motion_Sense: 0.2
+  SHL_2018: 0.2
+  HHAR: 0.2
+  MobiAct: 0.2
+  Opportunity: 0.2
+  Pamap2: 0.25
+  RealWorld: 0.2
+  DSADS: 0.15
+  SHO: 0.2
+
 LR: 0.0005
 
 K_FOLDS: 10
@@ -93,6 +105,72 @@ ConvBoost_Single_torch:
                   'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
 
 TSF_torch:
+  conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
+               'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
+  context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
+                  'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
+
+TSF_coif2_torch:
+  conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
+               'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
+  context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
+                  'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
+
+TSF_coif4_torch:
+  conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
+               'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
+  context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
+                  'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
+
+TSF_db2_torch:
+  conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
+               'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
+  context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
+                  'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
+
+TSF_db6_torch:
+  conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
+               'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
+  context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
+                  'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
+
+TSF_sym2_torch:
+  conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
+               'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
+  context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
+                  'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
+
+TSF_sym4_torch:
+  conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
+               'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
+  context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
+                  'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
+
+TSF_bior1_3_torch:
+  conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
+               'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
+  context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
+                  'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
+
+TSF_bior1_5_torch:
+  conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
+               'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
+  context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
+                  'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
+
+TSF_haar_torch:
+  conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
+               'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
+  context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
+                  'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
+
+TSF_split4_2_torch:
+  conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
+               'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
+  context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
+                  'Opportunity': 128, 'Pamap2': 128, 'RealWorld': 128, 'DSADS': 128, 'SHO': 128}
+
+TSF_split8_1_torch:
   conv_chnnl: {'HAPT': 64, 'Motion_Sense': 64, 'SHL_2018': 64, 'HHAR': 64, 'MobiAct': 64,
                'Opportunity': 64, 'Pamap2': 64, 'RealWorld': 64, 'DSADS': 64, 'SHO': 64}
   context_chnnl: {'HAPT': 128, 'Motion_Sense': 128, 'SHL_2018': 128, 'HHAR': 128, 'MobiAct': 128,
