@@ -384,7 +384,6 @@ class FALayer(nn.Module):
                                   nn.Linear(3*in_dim//2, 1),
                                   nn.Tanh()
                                  )
-        self.graph_act = nn.Tanh()
 
     def edge_applying(self, edges):
         

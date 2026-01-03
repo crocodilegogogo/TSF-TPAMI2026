@@ -28,7 +28,7 @@ Dropout_rate:
   SHL_2018: 0.2
   HHAR: 0.2
   MobiAct: 0.2
-  Opportunity: 0.2
+  Opportunity: 0.15
   Pamap2: 0.25
   RealWorld: 0.2
   DSADS: 0.15
