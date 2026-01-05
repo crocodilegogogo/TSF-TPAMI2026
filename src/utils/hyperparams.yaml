@@ -31,7 +31,7 @@ Dropout_rate:
   Opportunity: 0.15
   Pamap2: 0.25
   RealWorld: 0.2
-  DSADS: 0.15
+  DSADS: 0.2
   SHO: 0.2
 
 LR: 0.0005
