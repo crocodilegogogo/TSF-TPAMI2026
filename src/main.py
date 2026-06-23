@@ -1,5 +1,12 @@
 import os
 import sys
+from pathlib import Path
+
+SRC_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SRC_DIR.parent
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 import numpy as np
 import pandas as pd
 import time
@@ -9,9 +16,9 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
 from utils.constants import *
 from utils.utils import *
+from utils.hf_downloader import ensure_tsf_model_weights
 
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 CUR_DIR = os.path.dirname(os.path.abspath(__file__))  # Path to current directory
 
 class Train_Test(object):
@@ -23,7 +30,7 @@ class Train_Test(object):
         for dataset_name in args.DATASETS:
             
             sep_flags = []
-            BATCH_SIZE, EPOCH, LR, K_FOLDS = get_hyperparams(os.path.join('utils','hyperparams.yaml'), dataset_name)
+            BATCH_SIZE, EPOCH, LR, K_FOLDS = get_hyperparams(os.path.join(CUR_DIR, 'utils', 'hyperparams.yaml'), dataset_name)
             
             for (classifer_id, classifier_name) in enumerate(args.CLASSIFIERS):
                 
@@ -39,6 +46,17 @@ class Train_Test(object):
                 if dataset_name != 'MobiAct':
                     # set logging settings
                     EXEC_TIME, LOG_DIR, MODEL_DIR, logger, fileHandler = logging_settings(classifier_name, CUR_DIR, dataset_name)
+                    if args.PATTERN == 'TEST' and getattr(args, "auto_download_models", True):
+                        ensure_tsf_model_weights(
+                            dataset_name,
+                            classifier_name,
+                            MODEL_DIR,
+                            repo_id=getattr(args, "hf_model_repo", "crocodilegogogo/TSF-Models"),
+                            revision=getattr(args, "hf_revision", None),
+                            cache_dir=getattr(args, "hf_cache_dir", None),
+                            token=getattr(args, "hf_token", None),
+                            force=getattr(args, "force_hf_download", False),
+                        )
                     time2 = 0
                     
                     for subject_id in ALL_SUBJECTS_ID:
@@ -66,7 +84,7 @@ class Train_Test(object):
                         
                         X_tr, X_val, Y_tr, Y_val = train_test_split(X_train, y_train, 
                                                                     test_size=0.1,
-                                                                    random_state=6,
+                                                                    random_state=args.seed,
                                                                     stratify=y_train)
                         ######################## Training and Testing Process ############################
                         # Create classifier
@@ -105,6 +123,17 @@ class Train_Test(object):
                     K_folds_subjects = get_K_folds_subjects(ALL_SUBJECTS_ID, K_FOLDS)
                     # set logging settings
                     EXEC_TIME, LOG_DIR, MODEL_DIR, logger, fileHandler = logging_settings(classifier_name, CUR_DIR, dataset_name)
+                    if args.PATTERN == 'TEST' and getattr(args, "auto_download_models", True):
+                        ensure_tsf_model_weights(
+                            dataset_name,
+                            classifier_name,
+                            MODEL_DIR,
+                            repo_id=getattr(args, "hf_model_repo", "crocodilegogogo/TSF-Models"),
+                            revision=getattr(args, "hf_revision", None),
+                            cache_dir=getattr(args, "hf_cache_dir", None),
+                            token=getattr(args, "hf_token", None),
+                            force=getattr(args, "force_hf_download", False),
+                        )
                     time2 = 0
                     
                     for (fold_id, subject_id) in enumerate(K_folds_subjects):
@@ -133,7 +162,7 @@ class Train_Test(object):
                         
                         X_tr, X_val, Y_tr, Y_val = train_test_split(X_train, y_train, 
                                                                     test_size=0.1,
-                                                                    random_state=6,
+                                                                    random_state=args.seed,
                                                                     stratify=y_train)
                         ######################## Training and Testing Process ############################
                         # Create classifier
@@ -165,6 +194,7 @@ class Train_Test(object):
                     #######################################################################
                     
 def main(args):
+    configure_runtime(args)
     Main = Train_Test(args)
 
 if __name__ == "__main__":

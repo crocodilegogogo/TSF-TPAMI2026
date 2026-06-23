@@ -32,7 +32,7 @@ This paper is an extension of our previous conference version [(paper link)](htt
 To train a model on specific dataset, you should issue the following command: 
 
 ```
-Run the 'src/main.py'. Select datasets or classifiers in 'src/constants.py'. Set '--PATTERN' of 'src/constants.py' as 'TRAIN'.
+Run the 'src/main.py'. Select datasets or classifiers in 'src/utils/constants.py'. Set '--PATTERN' of 'src/constants.py' as 'TRAIN'.
 ```
 
 Or:

@@ -18,18 +18,20 @@ from utils.load_Pamap2_dataset.load_Pamap2_dataset import load_Pamap2_data
 from utils.load_RealWorld_dataset.load_RealWorld_dataset import load_RealWorld_data
 from utils.load_DSADS_dataset.load_DSADS_dataset import load_DSADS_data
 from utils.load_SHO_dataset.load_SHO_dataset import load_SHO_data
+from utils.hf_downloader import ensure_dataset_available
 
 import os
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import shap
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data as Data
 import time
+import random
 
 from sklearn.metrics import (
     accuracy_score,
@@ -40,9 +42,37 @@ from sklearn.metrics import (
     recall_score,
 )
 
-shap.initjs()
+# Avoid parsing command-line arguments at import time.  The main entry point
+# calls configure_runtime(args) after parse_args().
 logger = getLogger(__name__)
-args   = parse_args()
+
+class _RuntimeArgs:
+    INFERENCE_DEVICE = os.environ.get("TSF_INFERENCE_DEVICE", "TEST_CUDA")
+    seed = int(os.environ.get("TSF_SEED", "6"))
+
+args = _RuntimeArgs()
+
+def configure_runtime(parsed_args):
+    """Register CLI arguments for utility functions without import-time argparse side effects."""
+    global args
+    args = parsed_args
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    set_random_seed(getattr(parsed_args, "seed", 6))
+
+def get_runtime_device():
+    """Return the active torch device while gracefully falling back to CPU."""
+    use_cuda = getattr(args, "INFERENCE_DEVICE", "TEST_CUDA") == "TEST_CUDA" and torch.cuda.is_available()
+    return torch.device("cuda" if use_cuda else "cpu")
+
+def set_random_seed(seed: int = 6):
+    """Set common random seeds for reproducible training runs."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
 
 def round_float(f: float, r: float = 0.000001) -> float:
     return float(Decimal(str(f)).quantize(Decimal(str(r)), rounding=ROUND_HALF_UP))
@@ -69,7 +99,7 @@ def round(arg: Any, r: float = 0.000001) -> Any:
 
 def get_hyperparams(path, dataset_name):
     
-    hparam_file     = open(path, mode='r')
+    hparam_file     = open(path, mode='r', encoding='utf-8')
     hyperparameters = yaml.load(hparam_file, Loader=yaml.FullLoader)
     BATCH_SIZE      = hyperparameters['BATCH_SIZE'][dataset_name]
     EPOCH           = hyperparameters['EPOCH'][dataset_name]
@@ -108,6 +138,20 @@ def get_sep_flags(classifier_name, dataset_name, sep_flags):
 
 def load_raw_data(dataset_name, CUR_DIR, separate_gravity_flag):
     
+    # Optional Hugging Face data pipeline. This is intentionally placed at the
+    # beginning of the legacy data loading entry so every dataset loader benefits
+    # without embedding download logic into each dataset-specific module.
+    if getattr(args, "auto_download_data", True):
+        ensure_dataset_available(
+            dataset_name,
+            project_root=os.path.dirname(CUR_DIR),
+            repo_id=getattr(args, "hf_dataset_repo", "crocodilegogogo/TSF-Datasets"),
+            revision=getattr(args, "hf_revision", None),
+            cache_dir=getattr(args, "hf_cache_dir", None),
+            token=getattr(args, "hf_token", None),
+            force=getattr(args, "force_hf_download", False),
+        )
+
     # load raw data
     if dataset_name == 'HAPT':
         DATA_DIR, MODELS_COMP_LOG_DIR, ACT_LABELS, ActID, TRAIN_SUBJECTS_ID,\
@@ -421,7 +465,7 @@ def create_cuda_classifier(dataset_name, classifier_name, INPUT_CHANNEL, POS_NUM
                                                     data_length, train_size, val_size, test_size,
                                                     nb_classes, STFT_intervals, BATCH_SIZE, INFERENCE_DEVICE, test_split)
     if INFERENCE_DEVICE == 'TEST_CUDA':
-        classifier.cuda()
+        classifier.to(get_runtime_device())
     print(classifier)
     classifier_parameter = get_parameter_number(classifier)
     
@@ -465,8 +509,7 @@ def training_process(logger, subject_id, X_tr, X_val, X_test, Y_tr, Y_val,
     output_directory_models = os.path.join(MODEL_DIR, 'SUBJECT_'+str(subject_id))
     flag_output_directory_models = create_directory(output_directory_models)
     if PATTERN == 'TRAIN':
-        flag_output_directory_models = PATTERN
-    if flag_output_directory_models is not None:
+        # flag_output_directory_models = PATTERN
         # for each subject, train the network and save the best validation model
         print('SUBJECT_'+str(subject_id)+': start to train')
         history, per_training_duration, log_training_duration = classifier_func.train_op(classifier, EPOCH, BATCH_SIZE, LR,
@@ -474,11 +517,23 @@ def training_process(logger, subject_id, X_tr, X_val, X_test, Y_tr, Y_val,
                                                                                          output_directory_models, log_training_duration,
                                                                                          test_split)
     else:
-        print('Already_done: '+'SUBJECT_'+str(subject_id))
-        # read the training duration of current subject
-        per_training_duration = pd.read_csv(os.path.join(output_directory_models, 'score.csv'),
-                                            skiprows=1, nrows=1, header = None)[1][0]
-        log_training_duration.append(per_training_duration)
+        if not os.path.exists(os.path.join(output_directory_models, 'score.csv')):
+            # for each subject, train the network and save the best validation model
+            print('SUBJECT_'+str(subject_id)+': start to train')
+            history, per_training_duration, log_training_duration = classifier_func.train_op(classifier, EPOCH, BATCH_SIZE, LR,
+                                                                                             X_tr, Y_tr, X_val, Y_val, X_test, y_test,
+                                                                                             output_directory_models, log_training_duration,
+                                                                                             test_split)
+        else:
+            print('Already_done: '+'SUBJECT_'+str(subject_id))
+            # read the training duration of current subject when available. HF-hosted
+            # pretrained weights may contain only checkpoint files, so fall back to 0.0.
+            score_path = os.path.join(output_directory_models, 'score.csv')
+            if os.path.exists(score_path):
+                per_training_duration = pd.read_csv(score_path, skiprows=1, nrows=1, header = None)[1][0]
+            else:
+                per_training_duration = 0.0
+            log_training_duration.append(per_training_duration)
         
     return per_training_duration, log_training_duration, output_directory_models
 
@@ -518,7 +573,7 @@ def predict_tr_val_test(dataset_name, network, nb_classes, LABELS,
     network_obj = network
     # load best saved validation models
     best_validation_model = os.path.join(output_directory_models, 'best_validation_model.pkl')
-    network_obj.load_state_dict(torch.load(best_validation_model))
+    network_obj.load_state_dict(torch.load(best_validation_model, map_location=get_runtime_device()))
     network_obj.eval()
     # get outputs of best saved validation models by concat them, input: train_x, val_x, test_x
     pred_train = np.array(model_predict(network_obj, train_x, train_y, test_split)[0])
@@ -580,8 +635,8 @@ def predict_tr_val_test(dataset_name, network, nb_classes, LABELS,
     return pred_train, pred_valid, pred_test, scores, (end-start)
 
 def get_test_loss_acc(net, loss_function, x_data, y_data, test_split=1, test_flag=False):
-    loss_sum_data = torch.tensor(0)
-    true_sum_data = torch.tensor(0)
+    loss_sum_data = torch.tensor(0, device=get_runtime_device())
+    true_sum_data = torch.tensor(0, device=get_runtime_device())
     batch_size_split = x_data.shape[0] // test_split
     if batch_size_split == 0:
         batch_size_split = 1
@@ -592,8 +647,8 @@ def get_test_loss_acc(net, loss_function, x_data, y_data, test_split=1, test_fla
     for step, (x,y) in enumerate(data_loader):
         with torch.no_grad():
             if args.INFERENCE_DEVICE == 'TEST_CUDA':
-                x = x.cuda()
-                y = y.cuda()
+                x = x.to(get_runtime_device())
+                y = y.to(get_runtime_device())
             output_bc = net(x, test_flag)[0]
             if len(output_bc.shape) == 1:
                 output_bc.unsqueeze_(dim=0)
@@ -601,7 +656,7 @@ def get_test_loss_acc(net, loss_function, x_data, y_data, test_split=1, test_fla
             out = output_bc
             
             if args.INFERENCE_DEVICE == 'TEST_CUDA':
-                pred_bc = torch.max(output_bc, 1)[1].data.cuda().squeeze() # 这变了
+                pred_bc = torch.max(output_bc, 1)[1].data.squeeze()
             else:
                 pred_bc = torch.max(output_bc, 1)[1].data.squeeze()
             loss_bc = loss_function(output_bc, y)
@@ -624,8 +679,8 @@ def get_test_loss_acc(net, loss_function, x_data, y_data, test_split=1, test_fla
     return loss, acc, weighted_f1
 
 def get_test_loss_acc_dynamic(net, loss_function, x_data, y_data, test_split=1, test_flag=False):
-    loss_sum_data = torch.tensor(0)
-    true_sum_data = torch.tensor(0)
+    loss_sum_data = torch.tensor(0, device=get_runtime_device())
+    true_sum_data = torch.tensor(0, device=get_runtime_device())
     output = []
     batch_size_split = x_data.shape[0] // test_split
     if batch_size_split == 0:
@@ -638,8 +693,8 @@ def get_test_loss_acc_dynamic(net, loss_function, x_data, y_data, test_split=1, 
     for step, (x,y) in enumerate(data_loader):
         with torch.no_grad():
             if args.INFERENCE_DEVICE == 'TEST_CUDA':
-                x = x.cuda()
-                y = y.cuda()
+                x = x.to(get_runtime_device())
+                y = y.to(get_runtime_device())
             output_bc = net(x, test_flag)[0]
             
             if len(output_bc.shape) == 1:
@@ -648,7 +703,7 @@ def get_test_loss_acc_dynamic(net, loss_function, x_data, y_data, test_split=1, 
             out = output_bc
             
             if args.INFERENCE_DEVICE == 'TEST_CUDA':
-                pred_bc = torch.max(output_bc, 1)[1].data.cuda().squeeze() # 这变了
+                pred_bc = torch.max(output_bc, 1)[1].data.squeeze()
             else:
                 pred_bc = torch.max(output_bc, 1)[1].data.squeeze()
             loss_bc = loss_function(output_bc, y)
@@ -671,8 +726,8 @@ def get_test_loss_acc_dynamic(net, loss_function, x_data, y_data, test_split=1, 
     return loss, acc, macro_f1
 
 def get_test_loss_acc_graph(net, loss_function, x_data, y_data, test_split=1, test_flag=False):
-    loss_sum_data = torch.tensor(0)
-    true_sum_data = torch.tensor(0)
+    loss_sum_data = torch.tensor(0, device=get_runtime_device())
+    true_sum_data = torch.tensor(0, device=get_runtime_device())
 #    output = []
     batch_size_split = x_data.shape[0] // test_split
     if batch_size_split == 0:
@@ -686,8 +741,8 @@ def get_test_loss_acc_graph(net, loss_function, x_data, y_data, test_split=1, te
             
             # calculate the output of networks
             if args.INFERENCE_DEVICE == 'TEST_CUDA':
-                x = x.cuda()
-                y = y.cuda()
+                x = x.to(get_runtime_device())
+                y = y.to(get_runtime_device())
             output_bc, attns = net(x, test_flag)
             g_matrix_bc      = attns[1]
             if len(output_bc.shape) == 1:
@@ -702,7 +757,7 @@ def get_test_loss_acc_graph(net, loss_function, x_data, y_data, test_split=1, te
                 g_matrix_out = torch.cat((g_matrix_out, g_matrix), axis=0)
             
             if args.INFERENCE_DEVICE == 'TEST_CUDA':
-                pred_bc = torch.max(output_bc, 1)[1].data.cuda().squeeze()
+                pred_bc = torch.max(output_bc, 1)[1].data.squeeze()
             else:
                 pred_bc = torch.max(output_bc, 1)[1].data.squeeze()
             loss_bc = loss_function(output_bc, y)
@@ -720,8 +775,8 @@ def get_test_loss_acc_graph(net, loss_function, x_data, y_data, test_split=1, te
     return loss, acc, weighted_f1, g_matrix_out
 
 def get_test_loss_acc_dwt(net, loss_function, x_data, y_data, test_split=1, test_flag=False):
-    loss_sum_data = torch.tensor(0)
-    true_sum_data = torch.tensor(0)
+    loss_sum_data = torch.tensor(0, device=get_runtime_device())
+    true_sum_data = torch.tensor(0, device=get_runtime_device())
     batch_size_split = x_data.shape[0] // test_split
     if batch_size_split == 0:
         batch_size_split = 1
@@ -734,8 +789,8 @@ def get_test_loss_acc_dwt(net, loss_function, x_data, y_data, test_split=1, test
             
             # calculate the output of networks
             if args.INFERENCE_DEVICE == 'TEST_CUDA':
-                x = x.cuda()
-                y = y.cuda()
+                x = x.to(get_runtime_device())
+                y = y.to(get_runtime_device())
             output_bc, attns = net(x, test_flag)
             DWT_matrix_bc    = attns[2]
             if len(output_bc.shape) == 1:
@@ -750,7 +805,7 @@ def get_test_loss_acc_dwt(net, loss_function, x_data, y_data, test_split=1, test
                 DWT_matrix_out = torch.cat((DWT_matrix_out, DWT_matrix), axis=0)
             
             if args.INFERENCE_DEVICE == 'TEST_CUDA':
-                pred_bc = torch.max(output_bc, 1)[1].data.cuda().squeeze()
+                pred_bc = torch.max(output_bc, 1)[1].data.squeeze()
             else:
                 pred_bc = torch.max(output_bc, 1)[1].data.squeeze()
             loss_bc = loss_function(output_bc, y)
@@ -776,12 +831,12 @@ def model_predict(net, x_data, y_data, test_split=1, test_flag=True):
     if batch_size_split == 0:
         batch_size_split = 1
     data_loader   = Data.DataLoader(dataset = torch_dataset,
-                                  batch_size = x_data.shape[0] // test_split,
+                                  batch_size = batch_size_split,
                                   shuffle = False)
     for step, (x,y) in enumerate(data_loader):
         with torch.no_grad():
             if args.INFERENCE_DEVICE == 'TEST_CUDA':
-                x = x.cuda()
+                x = x.to(get_runtime_device())
             output_bc, attn_bc = net(x, test_flag)
             if type(attn_bc) == list:
                 attn_bc = attn_bc[0]
@@ -948,8 +1003,8 @@ def log_flops(logger, network, train_x):
     inputs_shape = torch.FloatTensor(train_x)[0].unsqueeze(0).shape
     inputs = torch.randn(inputs_shape)
     if args.INFERENCE_DEVICE == 'TEST_CUDA':
-        inputs = inputs.cuda()
-    flops, paras = profile(network, inputs = (inputs))
+        inputs = inputs.to(get_runtime_device())
+    flops, paras = profile(network, inputs = (inputs,))
     flops, paras = clever_format([flops, paras], "%.3f")
     print(flops, paras)
     # flops
@@ -1219,17 +1274,32 @@ def training_process_fold(logger, fold_id, X_tr, X_val, X_test, Y_tr, Y_val,
     if PATTERN == 'TRAIN':
         flag_output_directory_models = PATTERN
     if flag_output_directory_models is not None:
-        # for each fold, train the network and save the best validation model
-        print('FOLD_'+str(fold_id)+': start to train')
-        history, per_training_duration, log_training_duration = classifier_func.train_op(classifier, EPOCH, BATCH_SIZE, LR,
-                                                                                         X_tr, Y_tr, X_val, Y_val, X_test, y_test,
-                                                                                         output_directory_models, log_training_duration,
-                                                                                         test_split)
+        if PATTERN == 'TEST':
+            best_model_path = os.path.join(output_directory_models, 'best_validation_model.pkl')
+            if not os.path.exists(best_model_path):
+                raise FileNotFoundError(
+                    f"TEST mode requires a pretrained checkpoint at {best_model_path}. "
+                    "Enable --auto-download-models or place the checkpoint manually."
+                )
+            print('Found pretrained model for FOLD_'+str(fold_id))
+            per_training_duration = 0.0
+            log_training_duration.append(per_training_duration)
+        else:
+            # for each fold, train the network and save the best validation model
+            print('FOLD_'+str(fold_id)+': start to train')
+            history, per_training_duration, log_training_duration = classifier_func.train_op(classifier, EPOCH, BATCH_SIZE, LR,
+                                                                                             X_tr, Y_tr, X_val, Y_val, X_test, y_test,
+                                                                                             output_directory_models, log_training_duration,
+                                                                                             test_split)
     else:
         print('Already_done: '+'FOLD_'+str(fold_id))
-        # read the training duration of current fold
-        per_training_duration = pd.read_csv(os.path.join(output_directory_models, 'score.csv'),
-                                            skiprows=1, nrows=1, header = None)[1][0]
+        # read the training duration of current fold when available. HF-hosted
+        # pretrained weights may contain only checkpoint files, so fall back to 0.0.
+        score_path = os.path.join(output_directory_models, 'score.csv')
+        if os.path.exists(score_path):
+            per_training_duration = pd.read_csv(score_path, skiprows=1, nrows=1, header = None)[1][0]
+        else:
+            per_training_duration = 0.0
         log_training_duration.append(per_training_duration)
     return per_training_duration, log_training_duration, output_directory_models
 

@@ -250,8 +250,8 @@ def train_op(network, EPOCH, BATCH_SIZE, LR,
         
          for step, (x,y) in enumerate(train_loader):
             
-             batch_x = x.cuda()
-             batch_y = y.cuda()
+             batch_x = x.to(get_runtime_device())
+             batch_y = y.to(get_runtime_device())
              output_bc = network(batch_x)[0]
             
              # cal the sum of pre loss per batch 
@@ -303,7 +303,7 @@ def train_op(network, EPOCH, BATCH_SIZE, LR,
      log_training_duration.append(per_training_duration)
     
      # save last_model
-    output_directory_last = os.path.join(output_directory_models, 'last_model.pkl')
+     output_directory_last = os.path.join(output_directory_models, 'last_model.pkl')
      torch.save(network.state_dict(), output_directory_last)
     
      # log history

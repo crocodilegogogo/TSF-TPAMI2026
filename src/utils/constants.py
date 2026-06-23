@@ -3,28 +3,119 @@ import numpy as np
 import yaml
 import argparse
 
+HF_DATASET_REPO = "crocodilegogogo/TSF-Datasets"
+HF_MODEL_REPO = "crocodilegogogo/TSF-Models"
+
+# Backwards-compatible default. Runtime code should prefer args.INFERENCE_DEVICE.
+INFERENCE_DEVICE = "TEST_CUDA"
+
 def parse_args():
-    
-    # The training options
-      parser = argparse.ArgumentParser(description='TSF for HAR')
-      
-      parser.add_argument('--PATTERN', type=str, default='TRAIN',
-                          help='PATTERN: TRAIN, TEST')
-      # ['HAPT','Motion_Sense','SHL_2018','HHAR','MobiAct','Opportunity','Pamap2','DSADS','RealWorld','SHO']
-      parser.add_argument('--DATASETS', nargs='+', default=['HAPT'],
-                          help='DATASETS: could put multiple datasets into the list')
-      # ['Deep_Conv_LSTM_torch','Deep_ConvLSTM_Attn_torch','DeepSense_torch','AttnSense_torch','GlobalFusion_torch',
-      #  'Transformer_Encoder_torch','Attend_And_Discriminate_torch','DynamicWHAR_torch','Deep_Conv_Transformer_torch',
-      #  'IF_ConvTransformer_torch','Attn_Boost_Single_torch','ConvBoost_Single_torch','TSF_torch']
-      parser.add_argument('--CLASSIFIERS', nargs='+', default=['DeepSense_torch','TSF_torch'],
-                          help='CLASSIFIERS: could put multiple classifiers into the list')
-      parser.add_argument('--test_split', type=int, default=100,
-                          help='The testing dataset is seperated into test_split pieces in the inference process.')
-      parser.add_argument('--INFERENCE_DEVICE', type=str, default='TEST_CUDA',
-                          help='inference device: TEST_CUDA, TEST_CPU')
-      args = parser.parse_args()
-      
-      return args
+    """Parse command-line arguments for TSF training/testing."""
+    parser = argparse.ArgumentParser(description="TSF for HAR")
+
+    parser.add_argument(
+        "--PATTERN",
+        type=str,
+        default="TRAIN",
+        choices=["TRAIN", "TEST"],
+        help="Execution mode: TRAIN or TEST.",
+    )
+    parser.add_argument(
+        "--DATASETS",
+        nargs="+",
+        default=["DSADS"],
+        help="Dataset names, e.g. HAPT, Motion_Sense, SHL_2018, HHAR, MobiAct, Opportunity, Pamap2, DSADS, RealWorld, SHO.",
+    )
+    parser.add_argument(
+        "--CLASSIFIERS",
+        nargs="+",
+        default=["TSF_torch"],
+        help="Classifier names, e.g. Deep_Conv_LSTM_torch, Deep_ConvLSTM_Attn_torch, DeepSense_torch, AttnSense_torch, \
+        GlobalFusion_torch, Transformer_Encoder_torch, Attend_And_Discriminate_torch, DynamicWHAR_torch, Deep_Conv_Transformer_torch, \
+        IF_ConvTransformer_torch, Attn_Boost_Single_torch, ConvBoost_Single_torch, TSF_torch.",
+    )
+    parser.add_argument(
+        "--test_split",
+        type=int,
+        default=50,
+        help="Number of pieces used to split the test set during inference.",
+    )
+    parser.add_argument(
+        "--INFERENCE_DEVICE",
+        type=str,
+        default="TEST_CUDA",
+        choices=["TEST_CUDA", "TEST_CPU"],
+        help="TEST_CUDA uses CUDA when available; TEST_CPU forces CPU.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=6,
+        help="Random seed used by Python, NumPy, and PyTorch.",
+    )
+    parser.add_argument(
+        "--auto-download-data",
+        dest="auto_download_data",
+        action="store_true",
+        default=True,
+        help="Automatically download missing datasets from Hugging Face before loading data. Enabled by default.",
+    )
+    parser.add_argument(
+        "--no-auto-download-data",
+        dest="auto_download_data",
+        action="store_false",
+        help="Disable automatic dataset downloads.",
+    )
+    parser.add_argument(
+        "--auto-download-models",
+        dest="auto_download_models",
+        action="store_true",
+        default=True,
+        help="Automatically download missing TSF model weights from Hugging Face in TEST mode. Enabled by default.",
+    )
+    parser.add_argument(
+        "--no-auto-download-models",
+        dest="auto_download_models",
+        action="store_false",
+        help="Disable automatic model weight downloads.",
+    )
+    parser.add_argument(
+        "--hf-dataset-repo",
+        type=str,
+        default=HF_DATASET_REPO,
+        help="Hugging Face dataset repo ID used by the automatic data pipeline.",
+    )
+    parser.add_argument(
+        "--hf-model-repo",
+        type=str,
+        default=HF_MODEL_REPO,
+        help="Hugging Face model repo ID used by the automatic model pipeline.",
+    )
+    parser.add_argument(
+        "--hf-revision",
+        type=str,
+        default=None,
+        help="Optional Hugging Face revision, branch, tag, or commit SHA.",
+    )
+    parser.add_argument(
+        "--hf-cache-dir",
+        type=str,
+        default=None,
+        help="Optional Hugging Face cache directory. If omitted, dataset cache is stored under datasets/.hf_cache and model cache under src/saved_models/.hf_cache, not the system user cache.",
+    )
+    parser.add_argument(
+        "--hf-token",
+        type=str,
+        default=None,
+        help="Optional Hugging Face access token. If omitted, huggingface_hub uses the cached login or HF_TOKEN env var.",
+    )
+    parser.add_argument(
+        "--force-hf-download",
+        action="store_true",
+        help="Force rematerializing datasets/model weights from Hugging Face even if local markers exist.",
+    )
+
+    return parser.parse_args()
 
 def get_HAPT_dataset_param(CUR_DIR, dataset_name, separate_gravity_flag):
     
@@ -299,7 +390,7 @@ def create_classifier(dataset_name, classifier_name, input_channel, POS_NUM,
                       data_length, train_size, val_size, test_size, nb_classes, STFT_intervals,
                       BATCH_SIZE, INFERENCE_DEVICE, test_split):
     
-    hparam_file     = open(os.path.join('utils','hyperparams.yaml'), mode='r')
+    hparam_file     = open(os.path.join(os.path.dirname(__file__), 'hyperparams.yaml'), mode='r', encoding='utf-8')
     hyperparameters = yaml.load(hparam_file, Loader=yaml.FullLoader)
     conv_chnnl      = hyperparameters[classifier_name]['conv_chnnl'][dataset_name]
     context_chnnl   = hyperparameters[classifier_name]['context_chnnl'][dataset_name]
